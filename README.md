@@ -1,6 +1,8 @@
 # Tollgate
 
-**Refundable Solana escrow payments for paid tool calls.** Every paid agent/tool call is locked in an on-chain escrow. The server can claim it (with a self-attested receipt hash), the server can voluntarily refund it on a self-detected failure, or anyone can crank a refund back to the payer once the deadline passes. The chain does not verify response correctness — it enforces who can settle, when, and how much.
+**Escrowed payments for AI agents. Pay per call. Refund if it fails.**
+
+Every paid agent/tool call is locked in an on-chain Solana escrow. The server can claim it (with a self-attested receipt hash), the server can voluntarily refund it on a self-detected failure, or anyone can crank a refund back to the payer once the deadline passes. The chain enforces who can settle, when, and how much — not whether the response was correct.
 
 The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/): they charge upfront. If a paid tool returns garbage, throws, or goes silent, the agent loses the money. Tollgate's primitive lets:
 
@@ -74,6 +76,9 @@ const tool = wrapTool(
     mint: USDC,
     amount: new BN(1_000),
     network: "solana-devnet",
+    deadlineSeconds: 300,         // payment expiry / cranker eligibility
+    executionTimeoutMs: 30_000,   // optional — abort+refund handlers running >30s
+    // lockStore: new RedisLockStore(redis), // optional — for multi-instance deploys
   }
 );
 

@@ -47,32 +47,67 @@ The binding is enforced by SDK code at the server. A server author who skips
 `verifyPayment` is unprotected. v2 will move the binding into the program by
 adding an explicit `endpoint_tag: [u8; 32]` field to the Escrow account.
 
-## What v1 doesn't have (planned for v2)
+## v1.3 (shipped) — production-readiness scaffolding
 
-- **Explicit on-chain endpoint tag.** Today the binding lives in the derived
-  nonce — defense in depth, but requires the SDK to enforce it. v2 will store
-  the tag directly on the escrow so the program rejects mis-bound claims.
-- **Client confirmation step.** Today the server can claim unilaterally. v2
-  should let the payer either co-sign settlement or open a dispute window
-  after the server claims.
-- **Commit-reveal on receipts.** Today `receipt` is a server-only attestation.
-  v2 could commit to the receipt at `open_escrow` and reveal at `claim`, or
-  have the server commit a hash and the payer reveal a nonce after seeing the
-  response.
-- **Slashable bonds.** Today there is no economic punishment for a server that
-  claims against bad responses. v2 could require server-staked collateral that
-  gets slashed on dispute.
-- **Mainnet deployment.** Devnet only as of writing. Mainnet requires an audit
-  pass and the v2 dispute mechanism.
+- **Pluggable durable lock store.** `wrapTool` accepts a `lockStore: LockStore`
+  that gates parallel handlers against the same escrow. Default
+  `MemoryLockStore` is fine for single-process; for multi-instance / serverless
+  / load-balanced deployments, drop in a Redis or Postgres adapter implementing
+  the same interface. Lock TTL defaults to the escrow deadline, so a crashed
+  process unwedges its own keys.
+- **Separated execution timeout.** `wrapTool({ executionTimeoutMs })` aborts a
+  runaway handler and triggers refund-by-server, independent of the on-chain
+  payment deadline. Useful for slow LLM calls or hung upstream APIs.
+- **Orphan cranker (`runCranker`).** A sidecar that scans for past-deadline
+  Open escrows targeting a given server and cranks `refund_timeout`. Set
+  `CRANK_ORPHANS=true` in the demo server to enable. Doesn't replace the
+  on-chain timeout — just makes sure it actually gets exercised promptly.
 
-## Recommended use today
+## Roadmap (clean version)
 
-- **Paid MCP tools where the worst case is bounded** (the agent loses one quote price, ~$0.001–$0.01 per call).
-- **Reputation-backed servers** where the server's off-chain identity is what the payer is trusting, and the on-chain escrow is just a way to enforce timeouts and clean refunds when the server itself opts in.
-- **Demos of the x402 escrow pattern** for hackathons / research.
+### v1 — market-ready (shipped + planned)
+- ✓ Endpoint binding via derived nonce
+- ✓ Server-attested receipt hashes
+- ✓ Server-self-refund on detected failure
+- ✓ Permissionless timeout-refund
+- ✓ Pluggable durable lock store
+- ✓ SDK execution timeout (separate from payment deadline)
+- ✓ Orphan cranker
+- ✓ Manifest spec for tool auto-discovery (v1.2)
+- ◯ On-chain `endpoint_tag` field (binding moves from SDK → program)
+- ◯ Real production deployments of 2–3 paid APIs (Brave + OpenAI scaffolded;
+  needs API keys + public hosting)
+- ◯ Hosted gateway (escrow verification, claim/refund cranking, monitoring)
+- ◯ Mainnet deployment after audit pass
+
+### v2 — trust layer
+- ◯ Client-confirmed settlement: payer co-signs or opens a dispute window
+- ◯ Commit-reveal on receipts: response hash committed at open, revealed at claim
+- ◯ Configurable separate deadlines on-chain: payment expiry, execution window,
+  claim window
+- ◯ Endpoint registry: public list of Tollgate-enabled APIs with metadata
+- ◯ Reputation system: refund rate, claim rate, response latency per server
+
+### v3 — protocol maturity
+- ◯ Server staking / bonds with slashing on dispute
+- ◯ External verifiers / oracles for response correctness
+- ◯ Marketplace + discovery layer
+- ◯ External security audit
+
+## Recommended use today (v1.3)
+
+- **Paid MCP tools where the worst case is bounded** (the agent loses one
+  quote price, typically $0.001–$0.05 per call).
+- **Reputation-backed servers** where off-chain identity is the trust anchor;
+  Tollgate just makes timeouts and clean refunds automatic.
+- **Single-process demos and hackathon submissions.** For multi-instance
+  production, replace the default `MemoryLockStore`.
 
 ## Not recommended today
 
 - High-value single calls (anything where losing the quote price would matter).
-- Adversarial server contexts where the server has incentive to claim against bad responses and disappear.
-- Anything that needs guaranteed correctness without an off-chain reputation/identity layer.
+- Adversarial server contexts where the server has incentive to claim against
+  bad responses and disappear.
+- Anything that needs guaranteed response correctness without an off-chain
+  reputation/identity layer.
+- Mainnet without an audit pass.

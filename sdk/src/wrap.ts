@@ -8,6 +8,7 @@ import {
   PaymentProof,
   PAYMENT_HEADER,
 } from "./x402";
+import { LockStore, MemoryLockStore } from "./lock";
 
 export interface ToolHandler<I, O> {
   (input: I): Promise<O>;
@@ -57,7 +58,38 @@ export interface WrapOptions {
   amount: BN | bigint | number;
   programId?: PublicKey;
   network: "solana-devnet" | "solana-mainnet";
+
+  /**
+   * Payment-side timeout, sent to the client in the 402 quote and used to set
+   * the on-chain escrow `deadline`. Anyone (incl. cranker daemons) may
+   * `refund_timeout` the escrow once this passes without a claim.
+   *
+   * Default 300s. Pick longer for slow upstream APIs (LLM streaming, batch
+   * scraping) and shorter for cheap calls where you want fast refunds.
+   */
   deadlineSeconds?: number;
+
+  /**
+   * Server-side execution timeout (milliseconds). Bounds how long the handler
+   * is allowed to run before being aborted and the escrow auto-refunded.
+   *
+   * This is INTENTIONALLY separate from `deadlineSeconds` — the on-chain
+   * deadline gates payment expiry / cranker eligibility, while this gates
+   * runaway local handlers (slow LLM, hung fetch). Default: no timeout.
+   */
+  executionTimeoutMs?: number;
+
+  /**
+   * Pluggable durable lock for in-flight escrow tracking. Defaults to an
+   * in-memory store, which only protects against parallel handlers within
+   * a single process.
+   *
+   * For multi-instance / serverless / load-balanced deployments, pass a
+   * Redis- or Postgres-backed implementation that satisfies the LockStore
+   * interface in `./lock.ts`. The lock TTL defaults to `deadlineSeconds`
+   * (in ms) so a crashed process doesn't leave a key wedged forever.
+   */
+  lockStore?: LockStore;
 }
 
 /**
@@ -80,7 +112,29 @@ export function wrapTool<I, O>(
     opts.serverWallet,
     opts.programId
   );
-  const inFlight = new Set<string>();
+  const lockStore: LockStore = opts.lockStore ?? new MemoryLockStore();
+  const lockTtlMs = (opts.deadlineSeconds ?? 300) * 1000;
+
+  function withTimeout<T>(p: Promise<T>, ms: number | undefined): Promise<T> {
+    if (!ms || ms <= 0) return p;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`handler exceeded executionTimeoutMs=${ms}`)),
+        ms
+      );
+      if (typeof timer.unref === "function") timer.unref();
+      p.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        }
+      );
+    });
+  }
 
   return {
     async serve(input, paymentHeader) {
@@ -108,17 +162,20 @@ export function wrapTool<I, O>(
       const escrow = await verifyPayment(client, required, proof);
       const escrowKey = escrow.toBase58();
 
-      if (inFlight.has(escrowKey)) {
+      const acquired = await lockStore.acquire(escrowKey, lockTtlMs);
+      if (!acquired) {
         return {
           kind: "in_use",
           error: new Error(`escrow ${escrowKey} is already being processed`),
         };
       }
-      inFlight.add(escrowKey);
 
       try {
         try {
-          const output = await handler(input);
+          const output = await withTimeout(
+            handler(input),
+            opts.executionTimeoutMs
+          );
           const receipt = receiptHash(output);
           const signature = await client.claim({
             server: opts.serverWallet,
@@ -144,7 +201,7 @@ export function wrapTool<I, O>(
           }
         }
       } finally {
-        inFlight.delete(escrowKey);
+        await lockStore.release(escrowKey);
       }
     },
   };

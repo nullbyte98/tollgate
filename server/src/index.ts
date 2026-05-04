@@ -3,7 +3,7 @@ import { Connection, Keypair, PublicKey, clusterApiUrl } from "@solana/web3.js";
 import BN from "bn.js";
 import * as fs from "fs";
 import * as path from "path";
-import { wrapTool, PAYMENT_HEADER } from "@tollgate/sdk";
+import { wrapTool, PAYMENT_HEADER, runCranker, TollgateClient } from "@tollgate/sdk";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const RPC_URL = process.env.RPC_URL ?? clusterApiUrl("devnet");
@@ -255,8 +255,20 @@ app.post("/tools/rerank", async (req, res) => {
   }
 });
 
+if (process.env.CRANK_ORPHANS === "true") {
+  console.log(`  cranker: ON (refunds past-deadline Open escrows targeting this server)`);
+  const crankerClient = TollgateClient.withWallet(connection, wallet);
+  runCranker({
+    client: crankerClient,
+    cranker: wallet,
+    serverPubkey: wallet.publicKey,
+    intervalMs: parseInt(process.env.CRANK_INTERVAL_MS ?? "60000", 10),
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`  listening on http://localhost:${PORT}`);
-  console.log(`  POST /tools/search   (0.001 USDC)`);
-  console.log(`  POST /tools/rerank   (0.002 USDC, pass {failMode:true} to test refund)`);
+  console.log(`  POST /tools/search       (0.001 USDC)`);
+  console.log(`  POST /tools/openai_chat  (0.020 USDC)`);
+  console.log(`  POST /tools/rerank       (0.002 USDC, pass {failMode:true} to test refund)`);
 });
