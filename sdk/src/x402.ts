@@ -18,9 +18,16 @@ export interface PaymentRequired {
   nonce: string;
 }
 
+/**
+ * Payment proof returned by the client and consumed by the server.
+ *
+ * Just the escrow address — the server re-fetches the on-chain state and
+ * re-derives the expected terms before claiming. We deliberately do NOT
+ * include the open-tx signature: the server doesn't verify it, so including
+ * it would imply a check we don't actually perform.
+ */
 export interface PaymentProof {
   escrow: string;
-  signature: string;
 }
 
 const HEADER = "X-PAYMENT";
@@ -111,7 +118,7 @@ export async function payAndProve(opts: {
 
   const deadline = Math.floor(Date.now() / 1000) + opts.required.deadlineSeconds;
 
-  const { escrow, signature } = await client.openEscrow({
+  const { escrow } = await client.openEscrow({
     payer: opts.payer,
     server,
     mint,
@@ -121,7 +128,7 @@ export async function payAndProve(opts: {
 
   return {
     escrow,
-    proof: { escrow: escrow.toBase58(), signature },
+    proof: { escrow: escrow.toBase58() },
   };
 }
 

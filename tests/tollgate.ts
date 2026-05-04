@@ -301,6 +301,184 @@ describe("tollgate", () => {
     }
   });
 
+  // ─── Adversarial cases ────────────────────────────────────────────────
+
+  it("rejects claim by wrong server (has_one mismatch)", async () => {
+    const nonce = new BN(20);
+    const amount = new BN(100_000);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 3600);
+
+    const { escrow, vault } = await openEscrow(nonce, amount, deadline);
+
+    const attacker = Keypair.generate();
+    await fund(attacker);
+    const attackerAta = await createAssociatedTokenAccount(
+      provider.connection,
+      attacker,
+      mint,
+      attacker.publicKey
+    );
+
+    try {
+      await program.methods
+        .claim(Buffer.alloc(0))
+        .accountsPartial({
+          server: attacker.publicKey,
+          escrow,
+          vault,
+          serverTokenAccount: attackerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([attacker])
+        .rpc();
+      expect.fail("expected has_one constraint failure");
+    } catch (e: any) {
+      // Anchor surfaces this as ConstraintHasOne / 2001
+      expect(e.toString()).to.match(/has[_ ]?one|HasOne|ConstraintHasOne|2001/i);
+    }
+  });
+
+  it("rejects claim into wrong-mint server token account", async () => {
+    const nonce = new BN(21);
+    const amount = new BN(100_000);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 3600);
+
+    const { escrow, vault } = await openEscrow(nonce, amount, deadline);
+
+    // Mint a *different* SPL mint and an ATA for the server under that mint
+    const otherMintAuthority = Keypair.generate();
+    await fund(otherMintAuthority);
+    const otherMint = await createMint(
+      provider.connection,
+      otherMintAuthority,
+      otherMintAuthority.publicKey,
+      null,
+      6
+    );
+    const wrongMintServerAta = await createAssociatedTokenAccount(
+      provider.connection,
+      server,
+      otherMint,
+      server.publicKey
+    );
+
+    try {
+      await program.methods
+        .claim(Buffer.alloc(0))
+        .accountsPartial({
+          server: server.publicKey,
+          escrow,
+          vault,
+          serverTokenAccount: wrongMintServerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([server])
+        .rpc();
+      expect.fail("expected mint constraint failure");
+    } catch (e: any) {
+      expect(e.toString()).to.match(/mint|Mint|ConstraintTokenMint|2014/i);
+    }
+  });
+
+  it("rejects claim after refund", async () => {
+    const nonce = new BN(22);
+    const amount = new BN(100_000);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 3600);
+
+    const { escrow, vault } = await openEscrow(nonce, amount, deadline);
+
+    await program.methods
+      .refundByServer()
+      .accountsPartial({
+        server: server.publicKey,
+        escrow,
+        vault,
+        payerTokenAccount: payerAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([server])
+      .rpc();
+
+    try {
+      await program.methods
+        .claim(Buffer.alloc(0))
+        .accountsPartial({
+          server: server.publicKey,
+          escrow,
+          vault,
+          serverTokenAccount: serverAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([server])
+        .rpc();
+      expect.fail("expected NotOpen");
+    } catch (e: any) {
+      expect(e.toString()).to.match(/NotOpen/);
+    }
+  });
+
+  it("rejects refund_by_server after claim", async () => {
+    const nonce = new BN(23);
+    const amount = new BN(100_000);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 3600);
+
+    const { escrow, vault } = await openEscrow(nonce, amount, deadline);
+
+    await program.methods
+      .claim(Buffer.alloc(0))
+      .accountsPartial({
+        server: server.publicKey,
+        escrow,
+        vault,
+        serverTokenAccount: serverAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([server])
+      .rpc();
+
+    try {
+      await program.methods
+        .refundByServer()
+        .accountsPartial({
+          server: server.publicKey,
+          escrow,
+          vault,
+          payerTokenAccount: payerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([server])
+        .rpc();
+      expect.fail("expected NotOpen");
+    } catch (e: any) {
+      expect(e.toString()).to.match(/NotOpen/);
+    }
+  });
+
+  it("rejects oversized receipt (>64 bytes)", async () => {
+    const nonce = new BN(24);
+    const amount = new BN(100_000);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 3600);
+
+    const { escrow, vault } = await openEscrow(nonce, amount, deadline);
+
+    try {
+      await program.methods
+        .claim(Buffer.alloc(65, 0xab))
+        .accountsPartial({
+          server: server.publicKey,
+          escrow,
+          vault,
+          serverTokenAccount: serverAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([server])
+        .rpc();
+      expect.fail("expected ReceiptTooLong");
+    } catch (e: any) {
+      expect(e.toString()).to.match(/ReceiptTooLong/);
+    }
+  });
+
   it("rejects double-claim on same escrow", async () => {
     const nonce = new BN(8);
     const amount = new BN(200_000);

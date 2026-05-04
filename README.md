@@ -1,8 +1,13 @@
 # Tollgate
 
-**Refundable x402 escrow primitive for Solana.** Pay-on-success agent calls — every paid tool call is held in an on-chain escrow that releases on success or refunds on failure / timeout.
+**Refundable Solana escrow payments for paid tool calls.** Every paid agent/tool call is locked in an on-chain escrow that the server can claim on success, or that the server (or anyone, after a deadline) can refund on failure.
 
-The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/): they charge upfront. If a paid agent tool returns garbage or times out, the agent loses the money. Tollgate holds the payment in escrow until the server proves delivery, and refunds automatically otherwise.
+The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/): they charge upfront. If a paid tool returns garbage, throws, or goes silent, the agent loses the money. Tollgate's primitive lets:
+
+- the **server** voluntarily refund on a self-detected failure (e.g. upstream API 5xx), and
+- **anyone** crank a refund back to the payer once the deadline passes if the server never claims.
+
+> **Trust model — read this.** Tollgate is **server-attested**, not trustlessly verified. A successful `claim` means *the server signed off and recorded a receipt hash on-chain*, not that the response was correct. A malicious server can still claim against a garbage response. The honest framing: **escrowed payment with server-attested settlement and timeout fallback.** See [TRUST.md](./TRUST.md) for what's enforced vs. what's assumed.
 
 ```
 ┌────────┐  402 Payment Required  ┌─────────┐

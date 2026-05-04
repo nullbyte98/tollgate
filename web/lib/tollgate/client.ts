@@ -5,6 +5,7 @@ import {
   BN,
   Wallet,
 } from "@coral-xyz/anchor";
+import { randomBytes } from "crypto";
 import {
   Connection,
   PublicKey,
@@ -82,7 +83,7 @@ export class TollgateClient {
     const nonce =
       params.nonce !== undefined
         ? new BN(params.nonce.toString())
-        : new BN(Date.now());
+        : new BN(randomBytes(8), "le");
 
     const [escrow] = escrowPda(this.programId, params.payer.publicKey, params.server, nonce);
     const [vault] = vaultPda(this.programId, escrow);
