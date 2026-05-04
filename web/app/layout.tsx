@@ -1,6 +1,6 @@
 export const metadata = {
   title: "Tollgate — Refundable x402 Escrow",
-  description: "Pay-on-success agent calls on Solana",
+  description: "Server-attested escrow payments for paid agent/tool calls on Solana",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

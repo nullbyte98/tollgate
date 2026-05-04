@@ -15,7 +15,8 @@ export default function Home() {
           tollgate
         </h1>
         <p style={{ margin: "8px 0 0", color: "#9ca3af", fontSize: 16 }}>
-          refundable x402 escrows on solana — pay on success, refund on failure
+          server-attested x402 escrows on solana — claim with a receipt hash,
+          refund on self-detected failure or deadline timeout
         </p>
       </header>
 

@@ -1,6 +1,6 @@
 # Tollgate
 
-**Refundable Solana escrow payments for paid tool calls.** Every paid agent/tool call is locked in an on-chain escrow that the server can claim on success, or that the server (or anyone, after a deadline) can refund on failure.
+**Refundable Solana escrow payments for paid tool calls.** Every paid agent/tool call is locked in an on-chain escrow. The server can claim it (with a self-attested receipt hash), the server can voluntarily refund it on a self-detected failure, or anyone can crank a refund back to the payer once the deadline passes. The chain does not verify response correctness — it enforces who can settle, when, and how much.
 
 The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/): they charge upfront. If a paid tool returns garbage, throws, or goes silent, the agent loses the money. Tollgate's primitive lets:
 
@@ -20,7 +20,7 @@ The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/
      │ open_escrow(amount, deadline, server)
      ▼
 ┌─────────────────┐
-│ Escrow PDA      │  ◄── claim(receipt)            on success
+│ Escrow PDA      │  ◄── claim(receipt)            server attests success
 │ vault: USDC     │  ◄── refund_by_server()        on detected failure
 │ status: Open    │  ◄── refund_timeout() (anyone) after deadline
 └─────────────────┘

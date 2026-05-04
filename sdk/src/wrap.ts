@@ -27,8 +27,10 @@ export interface WrappedTool<I, O> {
    * sends this as a 402 response.
    *
    * If present, verifies the escrow (including endpoint binding via the
-   * derived nonce), runs the handler, claims on success (with the response
-   * hash as receipt), and refunds on handler error.
+   * derived nonce), runs the handler, and on a non-throwing return claims
+   * the escrow with a server-attested receipt hash. On a thrown handler
+   * error the server self-refunds. The chain does not verify response
+   * correctness — see TRUST.md.
    *
    * If the same escrow is already being processed by this server instance,
    * returns `{ kind: "in_use" }` to block the parallel-handler attack
