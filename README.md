@@ -31,7 +31,7 @@ The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/
 ```
 tollgate/
 ├── programs/tollgate/   Anchor program (4 instructions, 1 account)
-├── tests/               Integration tests (8/8 passing)
+├── tests/               Integration tests (19/19 passing — 13 program + 6 SDK)
 ├── sdk/                 TypeScript SDK: TollgateClient, wrapTool, payAndCall
 ├── server/              Demo HTTP server with 2 paid endpoints
 └── web/                 Next.js dashboard — live escrows by payer or server
@@ -63,15 +63,23 @@ import { wrapTool, payAndCall } from "@tollgate/sdk";
 // ── server side ──
 const tool = wrapTool(
   async ({ q }: { q: string }) => ({ results: await search(q) }),
-  { connection, serverWallet, mint: USDC, amount: new BN(1_000), network: "solana-devnet" }
+  {
+    endpointId: "tool:search-v1", // REQUIRED — binds escrow to this endpoint via derived nonce
+    connection,
+    serverWallet,
+    mint: USDC,
+    amount: new BN(1_000),
+    network: "solana-devnet",
+  }
 );
 
 // in your HTTP / MCP handler:
 const result = await tool.serve(input, req.header("X-PAYMENT"));
-// result.kind === "402" | "ok" | "error"
-//   "402"   → respond 402 with result.body
-//   "ok"    → respond 200 with result.output (claim already submitted with response hash)
-//   "error" → respond 500 (handler threw — payer auto-refunded)
+// result.kind === "402" | "ok" | "error" | "in_use"
+//   "402"    → respond 402 with result.body
+//   "ok"     → respond 200 with result.output (claim already submitted with response hash)
+//   "error"  → respond 500 (handler threw — payer auto-refunded)
+//   "in_use" → respond 409 (same proof already being processed by this server)
 
 // ── client side ──
 const { response, escrow } = await payAndCall({
@@ -87,7 +95,7 @@ const { response, escrow } = await payAndCall({
 
 ```bash
 # 1. program
-anchor build && anchor test          # 8/8 passing
+anchor build && anchor test          # 19/19 passing (13 program + 6 SDK)
 
 # 2. demo server (paid /tools/search and /tools/rerank)
 cd server && yarn build && \
