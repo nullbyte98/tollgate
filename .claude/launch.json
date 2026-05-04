@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tollgate-web",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["--cwd", "/Users/talal/Downloads/tollgate/web", "dev"],
+      "port": 3000
+    }
+  ]
+}
