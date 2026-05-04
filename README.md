@@ -33,7 +33,8 @@ tollgate/
 ├── programs/tollgate/   Anchor program (4 instructions, 1 account)
 ├── tests/               Integration tests (19/19 passing — 13 program + 6 SDK)
 ├── sdk/                 TypeScript SDK: TollgateClient, wrapTool, payAndCall
-├── server/              Demo HTTP server with 2 paid endpoints
+├── server/              Demo HTTP server with 2 paid endpoints (mock search + rerank)
+├── brave/               Forked from official MCP brave-search — paid Brave Search via Tollgate
 ├── mcp/                 Stdio MCP shim — lets Claude Desktop / any MCP agent call the paid endpoints
 └── web/                 Next.js dashboard — live escrows by payer or server
 ```

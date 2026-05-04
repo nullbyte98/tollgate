@@ -25,6 +25,7 @@ import { payAndCall } from "@tollgate/sdk";
 
 const RPC_URL = process.env.RPC_URL ?? clusterApiUrl("devnet");
 const SERVER_URL = process.env.TOLLGATE_SERVER_URL;
+const BRAVE_SERVER_URL = process.env.TOLLGATE_BRAVE_URL;
 const MAX = new BN(process.env.MAX_USDC_PER_CALL ?? "10000");
 
 if (!SERVER_URL) {
@@ -54,18 +55,25 @@ console.error(
   })
 );
 
-const TOOLS = [
+type ToolDef = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  base: string;
+  endpoint: string;
+};
+
+const TOOLS: ToolDef[] = [
   {
     name: "web_search",
     description:
-      "Paid web search via Tollgate. Each call opens a Solana escrow for ~0.001 USDC; the server claims on success or auto-refunds on failure.",
+      "Paid web search via Tollgate. Each call opens a Solana escrow for ~0.001 USDC; the server claims on attested success or auto-refunds on handler error.",
     inputSchema: {
       type: "object",
-      properties: {
-        q: { type: "string", description: "search query" },
-      },
+      properties: { q: { type: "string", description: "search query" } },
       required: ["q"],
     },
+    base: SERVER_URL!,
     endpoint: "/tools/search",
   },
   {
@@ -85,9 +93,46 @@ const TOOLS = [
       },
       required: ["items", "query"],
     },
+    base: SERVER_URL!,
     endpoint: "/tools/rerank",
   },
-] as const;
+];
+
+if (BRAVE_SERVER_URL) {
+  TOOLS.push(
+    {
+      name: "brave_web_search",
+      description:
+        "Paid web search via the Brave Search API, gated by Tollgate (forked from the official MCP brave-search server). Each call opens a Solana escrow for ~0.005 USDC; if Brave 5xxs or rate-limits, the handler throws and the escrow refunds automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query (max 400 chars)" },
+          count: { type: "number", description: "1-20, default 10" },
+          offset: { type: "number", description: "0-9, default 0" },
+        },
+        required: ["query"],
+      },
+      base: BRAVE_SERVER_URL,
+      endpoint: "/tools/brave_web_search",
+    },
+    {
+      name: "brave_local_search",
+      description:
+        "Paid local-business search via Brave's Local Search API (forked from official MCP brave-search). 0.008 USDC per call. Falls back to web search if no local results, and auto-refunds on Brave failure.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          count: { type: "number", description: "1-20, default 5" },
+        },
+        required: ["query"],
+      },
+      base: BRAVE_SERVER_URL,
+      endpoint: "/tools/brave_local_search",
+    }
+  );
+}
 
 const server = new Server(
   { name: "tollgate-mcp", version: "0.1.0" },
@@ -111,7 +156,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
   }
 
-  const url = `${SERVER_URL}${tool.endpoint}`;
+  const url = `${tool.base}${tool.endpoint}`;
   const args = (req.params.arguments ?? {}) as Record<string, unknown>;
 
   try {

@@ -55,6 +55,17 @@ async function main() {
   for (const c of (r2.content as any[]) ?? []) console.log(c.text);
   console.log(`isError: ${r2.isError}`);
 
+  if (process.env.TOLLGATE_BRAVE_URL) {
+    console.log("\n── tools/call brave_web_search (real Brave if BRAVE_API_KEY set, else mock) ──");
+    const r3 = await client.callTool({
+      name: "brave_web_search",
+      arguments: { query: "tollgate solana x402", count: 3 },
+    });
+    for (const c of (r3.content as any[]) ?? []) console.log(c.text);
+  } else {
+    console.log("\n(skipping brave_web_search — set TOLLGATE_BRAVE_URL to enable)");
+  }
+
   await client.close();
 }
 
