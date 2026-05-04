@@ -3,8 +3,8 @@ import {
   Program,
   Idl,
   BN,
-  Wallet,
 } from "@coral-xyz/anchor";
+import NodeWallet from "@coral-xyz/anchor/dist/cjs/nodewallet";
 import { randomBytes } from "crypto";
 import {
   Connection,
@@ -64,7 +64,7 @@ export class TollgateClient {
     wallet: Keypair,
     programId: PublicKey = TOLLGATE_PROGRAM_ID
   ): TollgateClient {
-    const provider = new AnchorProvider(connection, new Wallet(wallet), {
+    const provider = new AnchorProvider(connection, new NodeWallet(wallet), {
       commitment: "confirmed",
     });
     return new TollgateClient(provider, programId);

@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import EscrowList from "../components/EscrowList";
+import TryIt from "../components/TryIt";
 
 export default function Home() {
   const [pubkey, setPubkey] = useState("");
   const [role, setRole] = useState<"payer" | "server">("payer");
   const [active, setActive] = useState<{ pubkey: string; role: "payer" | "server" } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   return (
     <main style={{ maxWidth: 920, margin: "0 auto", padding: "48px 24px" }}>
@@ -84,9 +86,18 @@ export default function Home() {
         </button>
       </section>
 
+      <TryIt
+        onResult={(r) => {
+          setPubkey(r.payer);
+          setRole("payer");
+          setActive({ pubkey: r.payer, role: "payer" });
+          setReloadKey((k) => k + 1);
+        }}
+      />
+
       {active && (
         <section style={{ marginTop: 32 }}>
-          <EscrowList pubkey={active.pubkey} role={active.role} />
+          <EscrowList key={reloadKey} pubkey={active.pubkey} role={active.role} />
         </section>
       )}
     </main>
