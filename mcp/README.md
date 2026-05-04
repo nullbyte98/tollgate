@@ -39,7 +39,7 @@ RPC_URL=https://api.devnet.solana.com \
   yarn tsx src/smoke.ts
 ```
 
-Expected: tools/list returns `web_search` + `rerank`. tools/call against `web_search` succeeds and returns results plus `_paid via tollgate escrow …_`. tools/call against `rerank` with `failMode: true` returns an error and the on-chain escrow status flips to `refunded`.
+Expected: tools/list returns every tool from every server's `/mcp/manifest`. tools/call against any of them opens an escrow, runs the tool, and either claims (success) or auto-refunds (handler error).
 
 ## Wire into Claude Desktop
 
@@ -54,19 +54,19 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "env": {
         "RPC_URL": "https://api.devnet.solana.com",
         "PAYER_WALLET": "/absolute/path/to/payer.json",
-        "TOLLGATE_SERVER_URL": "https://your-deployed-tollgate-server.example",
-        "MAX_USDC_PER_CALL": "10000"
+        "TOLLGATE_SERVERS": "http://localhost:3401,http://localhost:3402,https://your-deployed-server.example",
+        "MAX_USDC_PER_CALL": "100000"
       }
     }
   }
 }
 ```
 
-Restart Claude Desktop. In any chat: *"search the web for solana x402"* — Claude will pick `web_search`, the shim opens an escrow on devnet, your server claims it, results come back. Open https://tollgate-dapp.vercel.app side-by-side with your payer pubkey to watch the escrow appear in real time.
+`TOLLGATE_SERVERS` is comma-separated. Each URL must serve `GET /mcp/manifest` per the [MANIFEST spec](../MANIFEST.md). Restart Claude Desktop. In any chat: *"search the web for solana x402"* — Claude picks the right tool from whichever server advertised it, the shim opens an escrow on devnet, server claims it, results come back. Open https://tollgate-dapp.vercel.app side-by-side with your payer pubkey to watch the escrow appear in real time.
 
 ## Adding more tools
 
-Edit the `TOOLS` array in [src/index.ts](./src/index.ts). Each entry is `{ name, description, inputSchema, endpoint }`. The shim treats the HTTP server as the source of truth for prices (each endpoint's `wrapTool` defines the amount and `endpointId`). To add a Brave Search tool, drop a `/tools/brave-search` endpoint in your server (wrapped with `wrapTool({ endpointId: "tool:brave-search-v1", ... })`), then add the corresponding entry here.
+You don't edit this shim. To add a new paid tool — say `helius_rpc` or your own SaaS — wrap it with `wrapTool` in any HTTP server, expose `GET /mcp/manifest` listing it (see [MANIFEST.md](../MANIFEST.md)), deploy that server, and add its URL to your `TOLLGATE_SERVERS` env. Restart Claude Desktop. The new tool appears in `tools/list` automatically.
 
 ## Trust + spending controls
 

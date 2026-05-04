@@ -56,6 +56,55 @@ const searchTool = wrapTool<{ q: string }, { q: string; results: string[] }>(
   }
 );
 
+// ─── Tool 3: paid OpenAI chat (real if OPENAI_API_KEY set, else mock) ────
+// Demonstrates that *any* paid HTTP API can be wrapped — same shape as Brave.
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? null;
+const openaiTool = wrapTool<
+  { model?: string; prompt: string },
+  { content: string; model: string; mocked: boolean }
+>(
+  async ({ model, prompt }) => {
+    if (!prompt) throw new Error("missing prompt");
+    const useModel = model ?? "gpt-4o-mini";
+    if (!OPENAI_API_KEY) {
+      return {
+        mocked: true,
+        model: useModel,
+        content: `[mock] would have asked ${useModel}: "${prompt.slice(0, 80)}". Set OPENAI_API_KEY for real responses.`,
+      };
+    }
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: useModel,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!r.ok) {
+      throw new Error(`openai ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    }
+    const body = (await r.json()) as any;
+    return {
+      mocked: false,
+      model: useModel,
+      content: body.choices?.[0]?.message?.content ?? "",
+    };
+  },
+  {
+    endpointId: "tool:openai-chat-v1",
+    connection,
+    serverWallet: wallet,
+    mint: MINT,
+    amount: new BN(20_000), // 0.02 USDC, covers a typical small chat call
+    network: NETWORK,
+    deadlineSeconds: 300,
+  }
+);
+
 // ─── Tool 2: paid LLM rerank (configurable fail to demo refund) ───────────
 const rerankTool = wrapTool<
   { items: string[]; query: string; failMode?: boolean },
@@ -92,6 +141,66 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, server: wallet.publicKey.toBase58() });
 });
 
+app.get("/mcp/manifest", (_req, res) => {
+  res.json({
+    server: wallet.publicKey.toBase58(),
+    version: 1,
+    tools: [
+      {
+        name: "web_search",
+        description:
+          "Mock paid web search via Tollgate. Each call opens a Solana escrow for 0.001 USDC; the server claims on attested success or auto-refunds on handler error.",
+        inputSchema: {
+          type: "object",
+          properties: { q: { type: "string", description: "search query" } },
+          required: ["q"],
+        },
+        endpoint: "/tools/search",
+        endpointId: "tool:search-v1",
+        amount: "1000",
+        mint: MINT.toBase58(),
+        network: NETWORK,
+      },
+      {
+        name: "openai_chat",
+        description: `Paid OpenAI chat via Tollgate (${OPENAI_API_KEY ? "real" : "mock"} mode). Demonstrates that any paid HTTP API drops in. Refunds automatically on OpenAI 5xx / 429 / parse error.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            prompt: { type: "string" },
+            model: { type: "string", description: "default: gpt-4o-mini" },
+          },
+          required: ["prompt"],
+        },
+        endpoint: "/tools/openai_chat",
+        endpointId: "tool:openai-chat-v1",
+        amount: "20000",
+        mint: MINT.toBase58(),
+        network: NETWORK,
+      },
+      {
+        name: "rerank",
+        description:
+          "Mock paid LLM-style rerank via Tollgate. Pass {failMode:true} to exercise auto-refund.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            items: { type: "array", items: { type: "string" } },
+            query: { type: "string" },
+            failMode: { type: "boolean" },
+          },
+          required: ["items", "query"],
+        },
+        endpoint: "/tools/rerank",
+        endpointId: "tool:rerank-v1",
+        amount: "2000",
+        mint: MINT.toBase58(),
+        network: NETWORK,
+      },
+    ],
+  });
+});
+
 async function handle<I, O>(
   req: Request,
   res: Response,
@@ -125,6 +234,14 @@ async function handle<I, O>(
 app.post("/tools/search", async (req, res) => {
   try {
     await handle(req, res, searchTool, req.body);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/tools/openai_chat", async (req, res) => {
+  try {
+    await handle(req, res, openaiTool, req.body);
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

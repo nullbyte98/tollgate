@@ -108,6 +108,50 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.get("/mcp/manifest", (_req, res) => {
+  res.json({
+    server: wallet.publicKey.toBase58(),
+    version: 1,
+    tools: [
+      {
+        name: "brave_web_search",
+        description: `Paid Brave Web Search via Tollgate (${BRAVE_API_KEY ? "real" : "mock"} mode). Refunds automatically if Brave 5xxs or rate-limits.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            count: { type: "number" },
+            offset: { type: "number" },
+          },
+          required: ["query"],
+        },
+        endpoint: "/tools/brave_web_search",
+        endpointId: "tool:brave-web-search-v1",
+        amount: "5000",
+        mint: MINT.toBase58(),
+        network: NETWORK,
+      },
+      {
+        name: "brave_local_search",
+        description: `Paid Brave Local Search via Tollgate (${BRAVE_API_KEY ? "real" : "mock"} mode). Falls back to web search if no local results; refunds on Brave failure.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            count: { type: "number" },
+          },
+          required: ["query"],
+        },
+        endpoint: "/tools/brave_local_search",
+        endpointId: "tool:brave-local-search-v1",
+        amount: "8000",
+        mint: MINT.toBase58(),
+        network: NETWORK,
+      },
+    ],
+  });
+});
+
 async function handle<I, O>(
   req: Request,
   res: Response,

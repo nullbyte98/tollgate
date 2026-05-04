@@ -11,6 +11,8 @@ The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/
 
 **Endpoint binding (v1.1).** Each paid endpoint declares a stable `endpointId`. The on-chain escrow `nonce` is deterministically derived from `sha256("tollgate-endpoint-v1" || endpointId || callId)`, so a proof opened against endpoint A cannot be replayed against endpoint B even if both quote the same `(server, mint, amount)`. Plus `wrapTool` keeps an in-flight set of escrows in memory to block parallel-handler attacks (one payment, two tools racing to do the work). See [`tests/sdk.ts`](./tests/sdk.ts) for the adversarial cases.
 
+**Auto-discovery via Tollgate Manifest (v1.2).** Any Tollgate-wrapped server exposes `GET /mcp/manifest` advertising its paid tools (name, schema, price, mint, endpointId). The MCP shim takes a `TOLLGATE_SERVERS` env var (comma-separated base URLs), fetches each manifest at startup, and dynamically registers every declared tool. **No code change to add a new paid API to your agent — deploy a server, add its URL to the env, restart Claude Desktop.** Spec at [MANIFEST.md](./MANIFEST.md). Worked examples in [server/](./server/) (mock search, rerank, OpenAI chat) and [brave/](./brave/) (forked Brave Search).
+
 ```
 ┌────────┐  402 Payment Required  ┌─────────┐
 │ client │ ─────────────────────► │ server  │
@@ -115,12 +117,12 @@ cd server && \
 cd web && yarn dev
 # open http://localhost:3000, paste a payer or server pubkey
 
-# 5. MCP shim — let Claude Desktop call the paid endpoints
+# 5. MCP shim — let Claude Desktop call ALL paid endpoints from any servers
 cd mcp && yarn build
-# smoke test (drives the shim with a synthetic MCP client, opens 2 real escrows)
+# smoke test against multiple servers — auto-discovers tools via /mcp/manifest
 RPC_URL=https://api.devnet.solana.com \
   PAYER_WALLET=/path/to/payer.json \
-  TOLLGATE_SERVER_URL=http://localhost:3401 \
+  TOLLGATE_SERVERS=http://localhost:3401,http://localhost:3402 \
   yarn tsx src/smoke.ts
 # wire into Claude Desktop — see mcp/README.md for the exact config snippet
 ```

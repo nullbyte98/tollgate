@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * Tollgate MCP shim — speaks MCP/stdio to the agent, speaks HTTP+x402 to the
- * tollgate-server. The agent has no idea it's paying. The shim opens an escrow
- * per call, retries with X-PAYMENT, and surfaces the on-chain settlement back
- * to the agent.
+ * Tollgate MCP shim — speaks MCP/stdio to the agent, speaks HTTP+x402 to any
+ * Tollgate-wrapped HTTP server. Tools are discovered dynamically at startup
+ * by fetching `GET /mcp/manifest` from each server in TOLLGATE_SERVERS.
  *
  * Env:
+ *   TOLLGATE_SERVERS     comma-separated list of server base URLs to discover
+ *                        (e.g. http://localhost:3401,http://localhost:3402)
  *   RPC_URL              Solana RPC (default: devnet)
  *   PAYER_WALLET         path to keypair JSON
- *   TOLLGATE_SERVER_URL  base URL of the tollgate HTTP server
- *   MAX_USDC_PER_CALL    refuse quotes above this (in raw units, 6-decimal USDC)
+ *   MAX_USDC_PER_CALL    refuse quotes above this (raw 6-decimal USDC units)
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -21,15 +21,19 @@ import { Connection, Keypair, clusterApiUrl } from "@solana/web3.js";
 import BN from "bn.js";
 import * as fs from "fs";
 import * as path from "path";
-import { payAndCall } from "@tollgate/sdk";
+import { payAndCall, ManifestResponse, ManifestTool } from "@tollgate/sdk";
 
 const RPC_URL = process.env.RPC_URL ?? clusterApiUrl("devnet");
-const SERVER_URL = process.env.TOLLGATE_SERVER_URL;
-const BRAVE_SERVER_URL = process.env.TOLLGATE_BRAVE_URL;
+const SERVERS = (process.env.TOLLGATE_SERVERS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const MAX = new BN(process.env.MAX_USDC_PER_CALL ?? "10000");
 
-if (!SERVER_URL) {
-  console.error("TOLLGATE_SERVER_URL is required");
+if (SERVERS.length === 0) {
+  console.error(
+    "TOLLGATE_SERVERS is required (comma-separated base URLs of Tollgate-wrapped servers exposing /mcp/manifest)"
+  );
   process.exit(1);
 }
 
@@ -37,105 +41,84 @@ function loadPayer(): Keypair {
   const p =
     process.env.PAYER_WALLET ??
     path.join(process.env.HOME ?? "", ".config/solana/id.json");
-  const raw = JSON.parse(fs.readFileSync(p, "utf8"));
-  return Keypair.fromSecretKey(Uint8Array.from(raw));
+  return Keypair.fromSecretKey(
+    Uint8Array.from(JSON.parse(fs.readFileSync(p, "utf8")))
+  );
 }
 
 const payer = loadPayer();
 const connection = new Connection(RPC_URL, "confirmed");
 
-// Log to stderr so it doesn't pollute the stdio MCP channel.
 console.error(
   JSON.stringify({
     msg: "tollgate-mcp starting",
     rpc: RPC_URL,
-    server: SERVER_URL,
+    servers: SERVERS,
     payer: payer.publicKey.toBase58(),
     maxUsdcPerCall: MAX.toString(),
   })
 );
 
-type ToolDef = {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
+interface RegisteredTool extends ManifestTool {
   base: string;
-  endpoint: string;
-};
-
-const TOOLS: ToolDef[] = [
-  {
-    name: "web_search",
-    description:
-      "Paid web search via Tollgate. Each call opens a Solana escrow for ~0.001 USDC; the server claims on attested success or auto-refunds on handler error.",
-    inputSchema: {
-      type: "object",
-      properties: { q: { type: "string", description: "search query" } },
-      required: ["q"],
-    },
-    base: SERVER_URL!,
-    endpoint: "/tools/search",
-  },
-  {
-    name: "rerank",
-    description:
-      "Paid LLM-style rerank via Tollgate. Takes items[] + query, returns items ordered by query-overlap. Same escrow + auto-refund flow as web_search.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        items: { type: "array", items: { type: "string" } },
-        query: { type: "string" },
-        failMode: {
-          type: "boolean",
-          description:
-            "Demo flag — when true the server's handler throws, exercising auto-refund.",
-        },
-      },
-      required: ["items", "query"],
-    },
-    base: SERVER_URL!,
-    endpoint: "/tools/rerank",
-  },
-];
-
-if (BRAVE_SERVER_URL) {
-  TOOLS.push(
-    {
-      name: "brave_web_search",
-      description:
-        "Paid web search via the Brave Search API, gated by Tollgate (forked from the official MCP brave-search server). Each call opens a Solana escrow for ~0.005 USDC; if Brave 5xxs or rate-limits, the handler throws and the escrow refunds automatically.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Search query (max 400 chars)" },
-          count: { type: "number", description: "1-20, default 10" },
-          offset: { type: "number", description: "0-9, default 0" },
-        },
-        required: ["query"],
-      },
-      base: BRAVE_SERVER_URL,
-      endpoint: "/tools/brave_web_search",
-    },
-    {
-      name: "brave_local_search",
-      description:
-        "Paid local-business search via Brave's Local Search API (forked from official MCP brave-search). 0.008 USDC per call. Falls back to web search if no local results, and auto-refunds on Brave failure.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-          count: { type: "number", description: "1-20, default 5" },
-        },
-        required: ["query"],
-      },
-      base: BRAVE_SERVER_URL,
-      endpoint: "/tools/brave_local_search",
-    }
-  );
 }
 
+async function discoverTools(): Promise<RegisteredTool[]> {
+  const all: RegisteredTool[] = [];
+  for (const base of SERVERS) {
+    const url = `${base.replace(/\/$/, "")}/mcp/manifest`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) {
+        console.error(
+          JSON.stringify({ msg: "manifest fetch failed", url, status: r.status })
+        );
+        continue;
+      }
+      const body = (await r.json()) as ManifestResponse;
+      if (body.version !== 1) {
+        console.error(
+          JSON.stringify({ msg: "unsupported manifest version", url, version: body.version })
+        );
+        continue;
+      }
+      for (const t of body.tools) {
+        all.push({ ...t, base: base.replace(/\/$/, "") });
+      }
+      console.error(
+        JSON.stringify({
+          msg: "manifest loaded",
+          url,
+          tools: body.tools.map((t) => `${t.name}@${t.amount}`),
+        })
+      );
+    } catch (e) {
+      console.error(
+        JSON.stringify({ msg: "manifest fetch error", url, error: String(e) })
+      );
+    }
+  }
+
+  // Detect duplicate tool names across servers — first one wins, log the rest.
+  const seen = new Set<string>();
+  const deduped: RegisteredTool[] = [];
+  for (const t of all) {
+    if (seen.has(t.name)) {
+      console.error(
+        JSON.stringify({ msg: "duplicate tool name dropped", name: t.name, base: t.base })
+      );
+      continue;
+    }
+    seen.add(t.name);
+    deduped.push(t);
+  }
+  return deduped;
+}
+
+let TOOLS: RegisteredTool[] = [];
+
 const server = new Server(
-  { name: "tollgate-mcp", version: "0.1.0" },
+  { name: "tollgate-mcp", version: "0.2.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -211,18 +194,22 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return {
       isError: true,
       content: [
-        {
-          type: "text",
-          text: `tollgate-mcp error: ${(err as Error).message}`,
-        },
+        { type: "text", text: `tollgate-mcp error: ${(err as Error).message}` },
       ],
     };
   }
 });
 
 async function main() {
+  TOOLS = await discoverTools();
+  if (TOOLS.length === 0) {
+    console.error("No tools discovered — exiting.");
+    process.exit(1);
+  }
   await server.connect(new StdioServerTransport());
-  console.error(JSON.stringify({ msg: "tollgate-mcp ready" }));
+  console.error(
+    JSON.stringify({ msg: "tollgate-mcp ready", tools: TOOLS.map((t) => t.name) })
+  );
 }
 
 main().catch((e) => {
