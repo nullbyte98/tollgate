@@ -34,6 +34,7 @@ tollgate/
 ├── tests/               Integration tests (19/19 passing — 13 program + 6 SDK)
 ├── sdk/                 TypeScript SDK: TollgateClient, wrapTool, payAndCall
 ├── server/              Demo HTTP server with 2 paid endpoints
+├── mcp/                 Stdio MCP shim — lets Claude Desktop / any MCP agent call the paid endpoints
 └── web/                 Next.js dashboard — live escrows by payer or server
 ```
 
@@ -112,6 +113,15 @@ cd server && \
 # 4. dashboard
 cd web && yarn dev
 # open http://localhost:3000, paste a payer or server pubkey
+
+# 5. MCP shim — let Claude Desktop call the paid endpoints
+cd mcp && yarn build
+# smoke test (drives the shim with a synthetic MCP client, opens 2 real escrows)
+RPC_URL=https://api.devnet.solana.com \
+  PAYER_WALLET=/path/to/payer.json \
+  TOLLGATE_SERVER_URL=http://localhost:3401 \
+  yarn tsx src/smoke.ts
+# wire into Claude Desktop — see mcp/README.md for the exact config snippet
 ```
 
 ## What this is and isn't
