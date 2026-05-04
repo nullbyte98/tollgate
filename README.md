@@ -9,6 +9,8 @@ The wedge over [mcpay](https://mcpay.tech) and [latinum](https://www.latinum.ai/
 
 > **Trust model — read this.** Tollgate is **server-attested**, not trustlessly verified. A successful `claim` means *the server signed off and recorded a receipt hash on-chain*, not that the response was correct. A malicious server can still claim against a garbage response. The honest framing: **escrowed payment with server-attested settlement and timeout fallback.** See [TRUST.md](./TRUST.md) for what's enforced vs. what's assumed.
 
+**Endpoint binding (v1.1).** Each paid endpoint declares a stable `endpointId`. The on-chain escrow `nonce` is deterministically derived from `sha256("tollgate-endpoint-v1" || endpointId || callId)`, so a proof opened against endpoint A cannot be replayed against endpoint B even if both quote the same `(server, mint, amount)`. Plus `wrapTool` keeps an in-flight set of escrows in memory to block parallel-handler attacks (one payment, two tools racing to do the work). See [`tests/sdk.ts`](./tests/sdk.ts) for the adversarial cases.
+
 ```
 ┌────────┐  402 Payment Required  ┌─────────┐
 │ client │ ─────────────────────► │ server  │

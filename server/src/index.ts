@@ -46,6 +46,7 @@ const searchTool = wrapTool<{ q: string }, { q: string; results: string[] }>(
     };
   },
   {
+    endpointId: "tool:search-v1",
     connection,
     serverWallet: wallet,
     mint: MINT,
@@ -74,6 +75,7 @@ const rerankTool = wrapTool<
     return { ranked: scored };
   },
   {
+    endpointId: "tool:rerank-v1",
     connection,
     serverWallet: wallet,
     mint: MINT,
@@ -108,6 +110,10 @@ async function handle<I, O>(
       escrow: result.escrow.toBase58(),
       claimSignature: result.signature,
     });
+    return;
+  }
+  if (result.kind === "in_use") {
+    res.status(409).json({ error: result.error.message });
     return;
   }
   res.status(500).json({

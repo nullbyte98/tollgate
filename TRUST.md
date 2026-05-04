@@ -28,12 +28,42 @@ Tollgate is a **server-attested escrow** primitive. Read this before relying on 
 | Network observer | See all escrow accounts, parties, amounts (devnet/mainnet are public) | Forge claims/refunds. |
 | MEV / front-runner | Front-run nothing useful — escrow PDAs are deterministic per `(payer, server, nonce)` so there's no race to claim a slot. | — |
 
+## v1.1 (shipped) — endpoint binding via derived nonce
+
+The on-chain escrow `nonce` is now deterministically derived as
+`sha256("tollgate-endpoint-v1" || endpointId || callId)[..8]`. That has two
+consequences:
+
+1. A proof minted against `tool:search-v1` cannot be replayed against
+   `tool:rerank-v1` even if both endpoints quote the same `(server, mint, amount)`
+   — the recomputed nonce won't match the on-chain value. Verified in
+   [`tests/sdk.ts`](./tests/sdk.ts).
+2. `wrapTool` keeps an in-memory `Set` of in-flight escrow addresses and
+   rejects a second concurrent `serve()` against the same proof with HTTP 409.
+   This blocks the parallel-handler attack where one payment is racing two
+   tools to "win" the work.
+
+The binding is enforced by SDK code at the server. A server author who skips
+`verifyPayment` is unprotected. v2 will move the binding into the program by
+adding an explicit `endpoint_tag: [u8; 32]` field to the Escrow account.
+
 ## What v1 doesn't have (planned for v2)
 
-- **Client confirmation step.** Today the server can claim unilaterally. v2 should let the payer either co-sign settlement or open a dispute window after the server claims.
-- **Commit-reveal on receipts.** Today `receipt` is a server-only attestation. v2 could commit to the receipt at `open_escrow` and reveal at `claim`, or have the server commit a hash and the payer reveal a nonce after seeing the response.
-- **Slashable bonds.** Today there is no economic punishment for a server that claims against bad responses. v2 could require server-staked collateral that gets slashed on dispute.
-- **Mainnet deployment.** Devnet only as of writing. Mainnet requires an audit pass and the v2 dispute mechanism.
+- **Explicit on-chain endpoint tag.** Today the binding lives in the derived
+  nonce — defense in depth, but requires the SDK to enforce it. v2 will store
+  the tag directly on the escrow so the program rejects mis-bound claims.
+- **Client confirmation step.** Today the server can claim unilaterally. v2
+  should let the payer either co-sign settlement or open a dispute window
+  after the server claims.
+- **Commit-reveal on receipts.** Today `receipt` is a server-only attestation.
+  v2 could commit to the receipt at `open_escrow` and reveal at `claim`, or
+  have the server commit a hash and the payer reveal a nonce after seeing the
+  response.
+- **Slashable bonds.** Today there is no economic punishment for a server that
+  claims against bad responses. v2 could require server-staked collateral that
+  gets slashed on dispute.
+- **Mainnet deployment.** Devnet only as of writing. Mainnet requires an audit
+  pass and the v2 dispute mechanism.
 
 ## Recommended use today
 
